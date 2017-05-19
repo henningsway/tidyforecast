@@ -1,0 +1,263 @@
+---
+title: "Forecast modeling in the tidyverse"
+author: "Janko Thyson & Henning Bumann"
+diesel_he: "13 Mai 2017"
+output: 
+  html_document:
+    toc: true
+---
+
+Check out http://unconj.ca/blog/forecasting-yyz-passengers-in-the-tidyverse.html for inspiration behind this code.
+
+```{r setup, include=FALSE}
+# NOTE
+# Corresponds to modeling_v1.1.Rmd
+
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+
+# Globals //
+from_cache <- TRUE
+# from_cache <- FALSE
+
+# overwrite <- TRUE
+overwrite <- FALSE
+```
+
+# Set up
+## Load packages
+```{r}
+library(dplyr)
+library(tidyr)  # tidyverse for model output
+library(purrr)  # Make your pure #rstats functions purr with purrr (2015-09)
+  # "There goes my workflow again! Great job. ;-)"
+library(broom)
+library(ggplot2)   # plotting, any questions?!
+library(forecast)  # hyndman - workhorse for forecasting in R
+library(xts)
+library(ggrepel) # for plotting the in- and out-of-sample-errors
+library(dygraphs)
+# library(MTS)
+# install.packages("smooth")
+  library(smooth)
+```
+
+## Load timeseries
+```{r}
+diesel_h <- readRDS("data/diesel_h.RDS")
+# Test design
+## Seasonality
+attributes(diesel_h)$frequency <- 24  # Hour in day
+## Data partitioning
+train <- diesel_h["/2017-04-01"]
+test  <- diesel_h["2017-04-01/"]
+## Forecasting horizon
+h <- 168 * 2 # 2 weeks
+```
+
+# Modeling setup meets the tidyverse
+## Parameters table
+### Naive
+```{r}
+params_naive <- tibble(kind = "naive",
+                       desc = "Naive",
+                       model = "default")
+```
+
+### Snaive
+```{r}
+params_snaive <- tibble(kind = "snaive",
+                        desc = "Seasonal Naive",
+                        model = "default")
+```
+
+### Ets
+```{r}
+# Create model cross-table with all relevant parameter combinations that should
+# be fitted
+params_ets <- tidyr::crossing(
+    error = c("M"), trend = c("N"),
+    seasonal = c("N", "M"), damped = c(FALSE)
+) %>%
+    # Drop combinations with a damped non-trend.
+    mutate(drop = ifelse(trend == "N" & damped, TRUE, FALSE)) %>%
+    filter(!drop) %>%
+    # Create labels for the models out of these parameters.
+    mutate(kind = "ETS",
+           desc = paste0("(", error, ",", trend,
+                         ifelse(damped, "d", ""),
+                         ",", seasonal, ")"),
+           model = paste0(error, trend, seasonal)) %>%
+    # Drop nonsensical models (these are flagged by `ets` anyway).
+    filter(!model %in% c("MMA", "AMN", "AMA", "AMM",
+                         "ANM", "AAM")) %>%
+    select(kind, desc, model, damped)
+```
+
+### Arima
+```{r}
+arima_params <- tibble(kind = "ARIMA",
+                       desc = "auto.arima")
+```
+
+### NNetar
+```{r}
+params_nnetar <- tibble(kind = "nnetar",
+                        desc = "Neuro",
+                        model = "default")
+```
+
+## Models table
+### Naive
+```{r}
+models_naive <- params_naive %>% 
+  mutate(fn = list(forecast::naive)) %>% 
+  mutate(params = list(list(
+    "y" = as.ts(train), "h" = h)))
+```
+
+### Snaive
+```{r}
+models_snaive <- params_snaive %>% 
+  mutate(fn = list(forecast::snaive)) %>% 
+  mutate(params = list(list(
+    "y" = as.ts(train), "h" = h)))
+```
+
+### Ets
+```{r}
+models_ets <- params_ets %>%
+  # Add in the training set and the modeling function.
+  mutate(fn = replicate(forecast::ets, n = n()),
+    train = replicate(list(train), n = n())) %>%
+  # Create a "param" column to pass to `fn`.
+  mutate(params = purrr::transpose(list(
+    "y" = train, "model" = model, "damped" = damped
+  ))) %>%
+  select(kind, desc, train, fn, params)
+
+models_ets
+```
+
+```{r}
+saveRDS(models_ets, "data/models_ets.RDS")
+```
+
+
+### Arima
+```{r}
+models_arima <- arima_params %>%
+    # Add in the training set and the modeling function.
+    mutate(fn = replicate(forecast::auto.arima, n = n()),
+           train = replicate(list(train), n = n())) %>%
+    # Create a "param" column to pass to `fn`.
+    mutate(params = purrr::transpose(list("y" = train))) %>%
+    select(kind, desc, train, fn, params)
+```
+
+### NNetar
+```{r}
+models_nnetar <- params_nnetar %>% 
+  mutate(fn = list(forecast::nnetar)) %>% 
+  mutate(params = list(list(
+    "y" = train)))
+```
+
+### Combine Models
+```{r}
+models_all <- bind_rows(models_naive,
+                        models_snaive,
+                        models_ets,
+                        models_arima,
+                        models_nnetar)
+```
+
+## Actual modeling
+### Fit models & Compute Forecasts
+```{r, cache = TRUE}
+forecast_all <- models_all %>%
+  mutate(fit = purrr::invoke_map(fn, params),
+         forecast = map(fit, forecast::forecast, h = h))
+```
+
+```{r}
+saveRDS(forecast_all, "data/forecast_all.RDS")
+```
+
+
+### Visualize forecasts
+```{r}
+for (i in 1:6){
+  fc <- forecast_all$forecast[[i]]
+  plot(fc, include = 168, ylim=c(1000, 1300))
+}
+```
+
+### Compute forecast accuracy
+#### Define `broom::glance` method
+```{r}
+glance.forecast <- function(x, newdata = NULL, ...) {
+    res <- if (is_null(newdata)) {
+        acc <- forecast::accuracy(x)
+        tibble::as_tibble(t(acc[1,]))
+    } else {
+        acc <- forecast::accuracy(x, newdata)
+        tibble::as_tibble(t(acc[2,]))
+    }
+    # Format the names of the measures to suit broom::glance().
+    names(res) <- tolower(names(res))
+    if (length(names(res)) > 7) names(res)[8] <- "thielsu"
+    res
+}
+```
+
+```{r}
+acc <- forecast_all %>%
+    mutate(glance = map(forecast, broom::glance)) %>%
+    unnest(glance) %>%
+    arrange(rmse, mae, mase)
+```
+
+
+
+## Model evaluation
+### Compute accuracy for out-of-sample data (`test`)
+```{r}
+perf_all <- forecast_all %>%
+    mutate(test = replicate(list(test), n = n()),
+           glance = map2(forecast, test, broom::glance)) %>%
+    tidyr::unnest(glance) %>%
+    # Pull out the out-of-sample RMSE, MAE, and MASE.
+    select(kind, desc, oos_rmse = rmse,
+           oos_mae = mae, oos_mape = mape) %>%
+    # Join the in-sample RMSE, MAE, and mape columns.
+    inner_join(acc, by = c("kind", "desc")) %>%
+    rename(is_rmse = rmse, is_mae = mae, is_mape = mape) %>%
+    arrange(oos_rmse, is_rmse) %>%
+    select(kind, desc, is_rmse, oos_rmse, is_mae, oos_mae,
+           is_mape, oos_mape)
+```
+
+```{r}
+saveRDS(perf_all, "data/perf_all.RDS")
+```
+
+### Visualize model selection
+```{r}
+# Graph in-sample vs. out-of-sample MASE for the top 50% of each.
+perf_all %>%
+    dplyr::filter(oos_mape < quantile(oos_mape, 0.5) |
+           is_mape < quantile(is_mape, 0.5)) %>%
+    ggplot(aes(y = oos_mape, x = is_mape)) +
+    geom_point(aes(colour = kind)) +
+    # Vertical/horizontal lines at the minimum mape for each sample.
+    geom_vline(aes(xintercept = min(is_mape)),
+               linetype = 5, colour = "gray50") +
+    geom_hline(aes(yintercept = min(oos_mape)),
+               linetype = 5, colour = "gray50") +
+    # Label the top models.
+    ggrepel::geom_label_repel(aes(label = paste(kind, desc)),
+                             size = 2.5, segment.colour = "gray50",
+                             data = perf_all) +
+    labs(x = "In-Sample MAPE", y = "Out-of-Sample MAPE",
+         colour = "Family")
+```

@@ -1,0 +1,109 @@
+---
+title: 'Data exploration'
+author: "Janko Thyson"
+diesel_he: "14 Mai 2017"
+output: 
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# knitr::opts_knit$set(root.dir = "..")
+suppressWarnings({
+  library(dygraphs)
+  library(xts)
+  library(forecast)
+  library(ggfortify)
+})
+```
+
+## Load diesel_ha 
+
+```{r}
+diesel_h <- readRDS("data/diesel_h.RDS")
+# diesel_h %>% attributes()
+# diesel_h %>% head()
+names(diesel_h) <- "diesel"
+```
+
+## Trend
+
+### Interactive
+
+```{r}
+dygraph(diesel_h) %>% dyRoller(rollPeriod = 24)
+```
+
+### All in one
+
+```{r}
+# Smooth "within day" >> how does a day look like?
+ma_24 <- rollmean(diesel_h, 24, fill = list(NA, NULL, NA))
+
+# Smooth "within week" >> how does a week look like?
+ma_168 <- rollmean(diesel_h, 24 * 7, fill = list(NA, NULL, NA))
+
+# Smooth "within month" >> how does a (standard) month look like?
+ma_5114 <- rollmean(diesel_h, round(24 * 7 * 30.44), fill = list(NA, NULL, NA))
+
+diesel_h_viz <- cbind(diesel_h, ma_24, ma_168, ma_5114)
+names(diesel_h_viz) <- c("value", "ma_24", "ma_168", "ma_5114")
+dygraph(diesel_h_viz)
+```
+
+## Seasonality
+
+### Hour in week 
+
+```{r}
+attributes(diesel_h)$frequency <- 24 * 7
+```
+
+#### Season plot
+
+```{r}
+ggseasonplot(as.ts(diesel_h), year.labels = FALSE)
+```
+
+#### Subseason plot
+
+```{r}
+ggmonthplot(as.ts(diesel_h))
+```
+
+#### NOTE
+**JUST AN EXAMPLE**
+Apply to correct/suitable aggregation level, doesn't make sense otherwise 
+
+```{r}
+ggfreqplot(as.ts(diesel_h), freq = 4)
+```
+
+-----
+
+### Hour in year 
+
+```{r}
+attributes(diesel_h)$frequency <- 24 * 7 * 52
+```
+
+#### Season plot
+
+```{r}
+ggseasonplot(as.ts(diesel_h))
+```
+
+#### Subseason plot
+
+```{r}
+ggmonthplot(as.ts(diesel_h))
+```
+
+#### NOTE
+**JUST AN EXAMPLE**
+Apply to correct/suitable aggregation level, doesn't make sense otherwise 
+
+```{r}
+ggfreqplot(as.ts(diesel_h), freq = 4)
+```

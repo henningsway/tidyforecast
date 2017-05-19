@@ -1,0 +1,65 @@
+---
+title: "Connecting to PostgreSQL"
+author: "Henning"
+output: html_document
+---
+
+
+# Dataprep
+### Inspect and merge old data for Aral-Timeseries
+```{r}
+library(xts)
+merge_ts <- function(ts_old, ts_akt, col = "e10"){
+  ts_old <- xts(x = ts_old[col], order.by = ts_old$date)
+  ts_akt <- xts(x = ts_akt[col], order.by = ts_akt$date)
+  ts_merged <- rbind(ts_old, ts_akt)
+  return(ts_merged)
+}
+
+diesel <- merge_ts(ts_old, ts_new, col = "diesel")
+```
+
+
+## Put the data on a hourly grid (take last price)
+```{r}
+on_hourly_grid <- function(ts){
+# every 1 hours
+s1 <- align.time(index(first(ts)), n = 3600)
+s2 <- align.time(index(last(ts)),  n = 3600)
+x1 <- seq(s1, s2, by = "1 hours")
+
+d1 <- align.time(ts, n = 3600)
+
+m2 <- cbind(d1, xts(order.by =  x1))
+ts_hourlygrid <- na.locf(m2)
+return(ts_hourlygrid)
+}
+
+diesel_h <- on_hourly_grid(diesel)
+```
+
+## Average over multiple prices on the same grid point
+```{r}
+avg_ts <- function(ts){
+  ts_avg <- aggregate(ts, index(ts), function(d) mean(d))
+  ts_avg <- as.xts(ts_avg)
+  return(ts_avg)
+}
+
+diesel_h <- avg_ts(diesel_h)
+saveRDS(diesel_h, "data/diesel_h.RDS")
+```
+
+
+# Aggregate Time Series
+```{r}
+# diesel_h
+diesel_d <- apply.daily(diesel_h, maen, na.rm = TRUE)
+diesel_w <- apply.weekly(diesel_h, mean, na.rm = TRUE)
+diesel_m <- apply.monthly(diesel_h, mean, na.rm = TRUE)
+
+
+d <- cbind(diesel_h, diesel_d, diesel_w, diesel_m)
+plot(as.zoo(d))
+```
+

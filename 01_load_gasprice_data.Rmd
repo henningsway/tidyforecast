@@ -1,0 +1,66 @@
+# Preparatory work necessary
+- Data can be obtained as PostgreSQL-dump from https://creativecommons.tankerkoenig.de/
+- import dumps into local PostgreSQL-Databases. Put historical information into *"tankerkoenig_old"* and up-to-date data into *"tankerkoenig"*.
+
+```{r, eval = FALSE}
+library(dplyr)  # provides database-interfacing functionality
+```
+
+# Connect to tankerkoenig_database and retrieve tables
+```{r, eval = FALSE}
+db_old <- src_postgres("tankerkoenig_old",
+                       user = "postgres", password = "test")
+stations     <- tbl(db_old, "gas_station")
+prices_old   <- tbl(db_old, "gas_station_information_history")
+```
+
+## Get id for Gasstation close to meetup location
+```{r, eval = FALSE}
+station_id <- stations %>%
+  filter(post_code == "20097", brand == "JET") %>%
+  select(id) %>% 
+  collect() %>% 
+  as.character()
+
+saveRDS(station_id, "data/station_id.RDS")
+```
+
+## Get old prices for selected gasstation
+```{r, eval = FALSE}
+prices_old <- prices_old %>%
+  filter(stid == station_id) %>%
+  collect()
+
+#saveRDS(prices_old, "data/prices_old.RDS")
+```
+
+# Connect to 2nd DB (contains new price information)
+```{r, eval = FALSE}
+db_new <- src_postgres("tankerkoenig",
+                       user = "postgres", password = "test")
+prices_new           <- tbl(db_new, "gas_station_information_history")
+```
+
+## Get new price information
+```{r, eval = FALSE}
+prices_new <- prices_new %>%
+  filter(stid == station_id) %>%
+  collect()
+
+#saveRDS(prices_new, "data/prices_new.RDS")
+```
+
+## Reread-Results
+```{r}
+station_id  <- readRDS("data/station_id.RDS")
+prices_old  <- readRDS("data/prices_old.RDS")
+prices_new  <- readRDS("data/prices_new.RDS")
+```
+
+# Assign data
+```{r}
+ts_old <- prices_old %>% 
+  filter(stid == station_id)
+ts_new <- prices_new %>% 
+  filter(stid == station_id)
+```

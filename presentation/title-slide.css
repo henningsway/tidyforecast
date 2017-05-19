@@ -1,0 +1,17 @@
+.title-slide {
+  background-image: url(images/tidyverse_sticker_blank2.png);
+  background-size: cover;
+}
+
+.title-slide h1 {
+  color: #F7F8FA;
+}
+
+.title-slide h2, .title-slide h3 {
+  color: #e7e8e2; 
+  line-height: 1.5em;
+}
+
+.title-slide .remark-slide-number {
+  display: none;
+}

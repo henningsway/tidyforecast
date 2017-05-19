@@ -1,0 +1,34 @@
+## check out oil price data
+```{r}
+library(Quandl)
+oil <- Quandl("OPEC/ORB", type = "xts")
+plot(oil["2014-05/"])
+plot(d3)
+```
+
+## Create tidyForecast-Sticker
+```{r}
+library(hexSticker)
+library(ggplot2)
+library(xts)
+library(forecast)
+
+diesel_h <- readRDS("data/diesel_h.RDS")
+
+p <- autoplot(diesel_h)
+# img <- png::readPNG("presentation/images/table_icon.png") 
+
+#p <- ggplot(aes(x = mpg, y = wt), data = mtcars) + geom_point()
+p +
+  # annotation_custom(grid::rasterGrob(img, 
+  #                              width = unit(1,"npc"), 
+  #                              height = unit(1,"npc")), 
+  #                              -Inf, Inf, -Inf, Inf) +
+  theme_void() +
+  theme_transparent()
+
+
+sticker(p, package="tidyForecast", p_size=8, s_x=1, s_y=.75, s_width=1.3, s_height=1,
+        filename="presentation/images/tidyforecast_sticker.png")
+```
+
